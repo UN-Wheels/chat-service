@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # ──────────────────────────────────────────────
+  #  MongoDB
+  # ──────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: uniwheels-mongodb
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.runCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  #  Chat Service
+  # ──────────────────────────────────────────────
+  chat-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: uniwheels-chat-service
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: 3001
+      MONGODB_URI: mongodb://mongodb:27017/uniwheels_chat
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_secret_change_me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+    driver: local
