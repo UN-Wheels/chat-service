@@ -1,8 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getConnectionToken } from '@nestjs/mongoose';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
+import { Connection } from 'mongoose';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -10,11 +12,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const configService = app.get(ConfigService);
+  const dbConnection = app.get<Connection>(getConnectionToken());
   const port = configService.get<number>('port', 3001);
-  const corsOrigin = configService.get<string>('cors.origin', 'http://localhost:5173');
 
-  // CORS — en dev permitimos cualquier origen para pruebas locales
   app.enableCors({
+    // Temporalmente abierto hasta definir los orígenes finales del frontend y API Gateway.
     origin: true,
     credentials: true,
   });
@@ -59,9 +61,7 @@ async function bootstrap() {
   // Health endpoint
   app.getHttpAdapter().get('/health', async (_req: any, res: any) => {
     try {
-      // Mongoose publica el estado de conexión
-      const mongoose = await import('mongoose');
-      const dbState = mongoose.connection.readyState;
+      const dbState = dbConnection.readyState;
       const dbStatus =
         dbState === 1
           ? 'connected'
@@ -89,7 +89,7 @@ async function bootstrap() {
     }
   });
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   logger.log(`Servidor escuchando en http://localhost:${port}`);
   logger.log(`Swagger disponible en http://localhost:${port}/swagger`);
 }
