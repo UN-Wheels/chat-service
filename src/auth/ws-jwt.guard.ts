@@ -65,10 +65,12 @@ export class WsJwtGuard implements CanActivate {
       return authHeader.substring(7);
     }
 
-    // 3. Cookie accessToken
+    // 3. Cookie access_token (nombre estándar definido por el API Gateway)
     const cookieHeader = client.handshake.headers?.cookie;
     if (cookieHeader) {
-      const match = cookieHeader.split(';').find((c) => c.trim().startsWith('accessToken='));
+      const match = cookieHeader
+        .split(';')
+        .find((c) => c.trim().startsWith('access_token='));
       if (match) {
         return match.split('=')[1]?.trim();
       }
