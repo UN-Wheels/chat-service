@@ -67,7 +67,7 @@
 <body>
   <header>
     <h1>🚗 UniWheels Chat — Test en Tiempo Real</h1>
-    <p>Dos usuarios simulados chateando por WebSocket. Abierto desde archivo local.</p>
+    <p>Tokens reales vía loggueo_service → API Gateway → chat-service. Servir desde localhost:5173.</p>
   </header>
 
   <div class="container">
@@ -87,6 +87,8 @@
         <button id="driver-send" disabled onclick="sendMessage('driver')">➤</button>
       </div>
       <div class="controls">
+        <input id="driver-email" type="email" placeholder="correo@unal.edu.co" style="flex:1;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
+        <input id="driver-password" type="password" placeholder="contraseña" style="width:90px;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
         <button onclick="connect('driver')">Conectar</button>
         <button onclick="disconnect('driver')">Desconectar</button>
         <button onclick="markRead('driver')">Marcar leído</button>
@@ -109,6 +111,8 @@
         <button id="passenger-send" disabled onclick="sendMessage('passenger')">➤</button>
       </div>
       <div class="controls">
+        <input id="passenger-email" type="email" placeholder="correo@unal.edu.co" style="flex:1;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
+        <input id="passenger-password" type="password" placeholder="contraseña" style="width:90px;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
         <button onclick="connect('passenger')">Conectar</button>
         <button onclick="disconnect('passenger')">Desconectar</button>
         <button onclick="markRead('passenger')">Marcar leído</button>
@@ -126,8 +130,11 @@
     // ══════════════════════════════════════════
     //  CONFIG
     // ══════════════════════════════════════════
-    const SERVER = 'http://localhost:3001';
-    const JWT_SECRET = 'dev_secret_change_me';
+    // SERVER apunta al API Gateway — todo el tráfico pasa por él
+    const SERVER = 'http://localhost:8080';
+    // Login directo al loggueo_service para obtener el token raw (Bearer)
+    // El gateway convierte el login en cookie HttpOnly, inaccesible desde JS
+    const LOGIN_URL = 'http://localhost:8000/api/v1/auth/login';
 
     // Ruta fija para que ambos usuarios SIEMPRE compartan la misma conversación
     const FIXED_ROUTE_ID = 'route_html_test_fixed';
@@ -136,38 +143,53 @@
     let sockets = { driver: null, passenger: null };
     let conversationId = null;
 
-    const users = {
-      driver:    { id: 'user_driver_001',    role: 'user' },
-      passenger: { id: 'user_passenger_001', role: 'user' },
-    };
-
-    // ══════════════════════════════════════════
-    //  JWT (HMAC-SHA256 via Web Crypto)
-    // ══════════════════════════════════════════
-    function base64url(str) {
-      return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    // Extrae el identificador de usuario (user_id o sub) de un JWT sin verificarlo
+    function parseUserId(tok) {
+      try {
+        const payload = JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return payload.user_id || payload.sub || 'unknown';
+      } catch { return 'unknown'; }
     }
 
-    async function makeToken(userId, role) {
-      const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-      const now = Math.floor(Date.now() / 1000);
-      const payload = base64url(JSON.stringify({
-        user_id: userId,
-        role: role,
-        iat: now,
-        exp: now + 3600
-      }));
-      const data = header + '.' + payload;
-      const key = await crypto.subtle.importKey(
-        'raw',
-        new TextEncoder().encode(JWT_SECRET),
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-      );
-      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
-      const signature = base64url(String.fromCharCode(...new Uint8Array(sig)));
-      return data + '.' + signature;
+    // ══════════════════════════════════════════
+    //  LOGIN REAL (loggueo_service)
+    // ══════════════════════════════════════════
+    async function loginUser(panel) {
+      const email = document.getElementById(panel + '-email').value.trim();
+      const password = document.getElementById(panel + '-password').value;
+
+      if (!email || !password) {
+        addSystemMsg(panel, '⚠ Ingresa email y contraseña');
+        return false;
+      }
+
+      logEvent('out', panel + ': login → ' + email);
+
+      try {
+        const res = await fetch(LOGIN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: email, password }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const msg = err.detail || 'Credenciales incorrectas';
+          logEvent('err', panel + ': login falló → ' + msg);
+          addSystemMsg(panel, '✗ ' + msg);
+          return false;
+        }
+
+        const data = await res.json();
+        TOKENS[panel] = data.access_token;
+        logEvent('in', panel + ': ✓ token obtenido');
+        addSystemMsg(panel, '✓ Login exitoso (' + email + ')');
+        return true;
+      } catch (e) {
+        logEvent('err', panel + ': error de red → ' + e.message);
+        addSystemMsg(panel, '✗ Error de red: ' + e.message);
+        return false;
+      }
     }
 
     // ══════════════════════════════════════════
@@ -214,11 +236,19 @@
 
     // ══════════════════════════════════════════
     //  CREAR / OBTENER CONVERSACIÓN (una sola vez)
+    //  Llama a /api/chat/conversations a través del gateway.
+    //  El gateway valida el Bearer, inyecta X-User-Id y lo reescribe a /conversations.
     // ══════════════════════════════════════════
     async function ensureConversation(token) {
       if (conversationId) return conversationId;
 
-      const res = await fetch(SERVER + '/conversations', {
+      const driverToken = TOKENS['driver'];
+      const passengerToken = TOKENS['passenger'];
+
+      const driverId    = driverToken    ? parseUserId(driverToken)    : 'user_driver_001';
+      const passengerId = passengerToken ? parseUserId(passengerToken) : 'user_passenger_001';
+
+      const res = await fetch(SERVER + '/api/chat/conversations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -226,8 +256,8 @@
         },
         body: JSON.stringify({
           routeId: FIXED_ROUTE_ID,
-          driverId: users.driver.id,
-          passengerId: users.passenger.id,
+          driverId,
+          passengerId,
         }),
       });
       const data = await res.json();
@@ -247,14 +277,22 @@
         return;
       }
 
-      var user = users[panel];
-      var token = await makeToken(user.id, user.role);
-      TOKENS[panel] = token;
+      // Si no hay token, intentar login primero
+      if (!TOKENS[panel]) {
+        const ok = await loginUser(panel);
+        if (!ok) return;
+      }
 
-      logEvent('out', panel + ': Conectando...');
+      var token = TOKENS[panel];
+      var userIdLocal = parseUserId(token);
 
+      logEvent('out', panel + ': Conectando al gateway...');
+
+      // path: '/api/chat/socket.io' — necesario para que el WS proxy del gateway
+      // intercepte la conexión (pathRewrite: '^/api/chat' → '') y la reenvíe al chat-service
       var socket = io(SERVER, {
         auth: { token: token },
+        path: '/api/chat/socket.io',
         transports: ['websocket'],
         forceNew: true,
       });
@@ -267,7 +305,6 @@
         // Crear conversación solo una vez
         try {
           var convId = await ensureConversation(TOKENS[panel]);
-          // Unirse al room
           socket.emit('conversation:join', { conversationId: convId });
           logEvent('out', panel + ': conversation:join → ' + convId.slice(-8));
           addSystemMsg(panel, 'Unido a la conversación');
@@ -293,7 +330,7 @@
       socket.on('message:new', function (data) {
         logEvent('in', panel + ': message:new de ' + data.senderId);
         // Mostrar solo si NO es propio (los propios ya se muestran al enviar)
-        if (data.senderId !== user.id) {
+        if (data.senderId !== userIdLocal) {
           addMessage(panel, data.content, 'received', formatTime(data.createdAt));
         }
       });
@@ -375,15 +412,7 @@
       if (e.key === 'Enter') sendMessage('passenger');
     });
 
-    // ══════════════════════════════════════════
-    //  AUTO-CONNECT
-    // ══════════════════════════════════════════
-    window.addEventListener('load', async function () {
-      await connect('driver');
-      // Pequeña espera para que la conversación se cree primero
-      await new Promise(function (r) { setTimeout(r, 800); });
-      await connect('passenger');
-    });
+    // Sin auto-connect — el usuario hace login manualmente con credenciales reales
   </script>
 </body>
 </html>
