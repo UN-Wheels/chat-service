@@ -95,12 +95,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const secret = this.configService.get<string>('jwt.accessSecret');
     const decoded = jwt.verify(token, secret!) as JwtPayload;
 
-    if (!decoded.user_id) {
+    // Normalizar: loggueo_service emite "sub" (email), otros servicios pueden usar "user_id"
+    const userId = decoded.user_id ?? decoded.sub;
+
+    if (!userId) {
       throw new Error('Token sin user_id');
     }
 
     return {
-      userId: decoded.user_id,
+      userId,
       role: decoded.role,
     };
   }

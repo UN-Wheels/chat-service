@@ -37,12 +37,15 @@ export class WsJwtGuard implements CanActivate {
       const secret = this.configService.get<string>('jwt.accessSecret');
       const decoded = jwt.verify(token, secret!) as JwtPayload;
 
-      if (!decoded.user_id) {
+      // Normalizar: loggueo_service emite "sub" (email), chat-service espera "user_id"
+      const userId = decoded.user_id ?? decoded.sub;
+
+      if (!userId) {
         throw new WsException('Token sin user_id');
       }
 
       client.data.user = {
-        userId: decoded.user_id,
+        userId,
         role: decoded.role,
       };
 
