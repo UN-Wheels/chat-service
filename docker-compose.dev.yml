@@ -1,0 +1,53 @@
+# Docker compose para desarrollo local con hot-reload
+services:
+  mongodb:
+    image: mongo:7
+    container_name: uniwheels-mongodb-dev
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_dev_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.runCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  chat-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: uniwheels-chat-service-dev
+    ports:
+      - '3001:3001'
+    volumes:
+      - ./src:/app/src
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      MONGODB_URI: mongodb://mongodb:27017/uniwheels_chat
+      JWT_ACCESS_SECRET: dev_secret_change_me
+      CORS_ORIGIN: http://localhost:5173
+      CHOKIDAR_USEPOLLING: 'true'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://127.0.0.1:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    command: npm run start:dev
+
+volumes:
+  mongodb_dev_data:
+    driver: local

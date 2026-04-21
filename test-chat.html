@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UniWheels Chat — Test en Tiempo Real</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+    header { background: #1e293b; padding: 16px 24px; text-align: center; border-bottom: 2px solid #334155; }
+    header h1 { font-size: 1.3rem; color: #38bdf8; }
+    header p { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+
+    .container { display: flex; gap: 16px; padding: 16px; max-width: 1200px; margin: 0 auto; height: calc(100vh - 80px); }
+
+    .chat-panel { flex: 1; display: flex; flex-direction: column; background: #1e293b; border-radius: 12px; overflow: hidden; border: 1px solid #334155; }
+
+    .panel-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #334155; }
+    .panel-header .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+    .driver-panel .avatar { background: #1d4ed8; }
+    .passenger-panel .avatar { background: #059669; }
+    .panel-header .info h3 { font-size: 0.95rem; }
+    .panel-header .info span { font-size: 0.7rem; color: #94a3b8; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; }
+    .status-dot.connected { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+    .status-dot.disconnected { background: #ef4444; }
+
+    .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .messages::-webkit-scrollbar { width: 6px; }
+    .messages::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; font-size: 0.85rem; line-height: 1.4; position: relative; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .msg.sent { align-self: flex-end; background: #1d4ed8; border-bottom-right-radius: 4px; }
+    .msg.received { align-self: flex-start; background: #334155; border-bottom-left-radius: 4px; }
+    .msg .meta { font-size: 0.65rem; color: #94a3b8; margin-top: 4px; text-align: right; }
+
+    .msg-system { align-self: center; background: transparent; color: #64748b; font-size: 0.75rem; font-style: italic; text-align: center; padding: 4px; }
+
+    .input-area { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #334155; background: #0f172a; }
+    .input-area input { flex: 1; background: #1e293b; border: 1px solid #475569; border-radius: 24px; padding: 10px 16px; color: #e2e8f0; font-size: 0.85rem; outline: none; transition: border-color 0.2s; }
+    .input-area input:focus { border-color: #38bdf8; }
+    .input-area input:disabled { opacity: 0.5; }
+    .input-area button { background: #2563eb; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 1.1rem; transition: background 0.2s; display: flex; align-items: center; justify-content: center; }
+    .input-area button:hover { background: #3b82f6; }
+    .input-area button:disabled { background: #475569; cursor: not-allowed; }
+
+    .controls { padding: 12px 16px; background: #0f172a; border-top: 1px solid #334155; display: flex; gap: 6px; flex-wrap: wrap; }
+    .controls button { background: #334155; color: #cbd5e1; border: 1px solid #475569; border-radius: 6px; padding: 6px 10px; font-size: 0.7rem; cursor: pointer; transition: all 0.2s; }
+    .controls button:hover { background: #475569; color: white; }
+
+    .log-panel { width: 280px; background: #1e293b; border-radius: 12px; border: 1px solid #334155; display: flex; flex-direction: column; }
+    .log-panel h3 { padding: 12px 16px; font-size: 0.85rem; color: #38bdf8; border-bottom: 1px solid #334155; }
+    .log-content { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.7rem; line-height: 1.6; }
+    .log-content::-webkit-scrollbar { width: 4px; }
+    .log-content::-webkit-scrollbar-thumb { background: #475569; border-radius: 2px; }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #1e293b; }
+    .log-entry.event-in { color: #4ade80; }
+    .log-entry.event-out { color: #38bdf8; }
+    .log-entry.event-err { color: #f87171; }
+    .log-entry .time { color: #64748b; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🚗 UniWheels Chat — Test en Tiempo Real</h1>
+    <p>Tokens reales vía loggueo_service → API Gateway → chat-service. Servir desde localhost:5173.</p>
+  </header>
+
+  <div class="container">
+    <!-- Panel Conductor -->
+    <div class="chat-panel driver-panel">
+      <div class="panel-header">
+        <div class="avatar">🚗</div>
+        <div class="info">
+          <h3>Conductor</h3>
+          <span>user_driver_001</span>
+        </div>
+        <div id="driver-status" class="status-dot disconnected"></div>
+      </div>
+      <div id="driver-messages" class="messages"></div>
+      <div class="input-area">
+        <input id="driver-input" type="text" placeholder="Escribe un mensaje..." disabled />
+        <button id="driver-send" disabled onclick="sendMessage('driver')">➤</button>
+      </div>
+      <div class="controls">
+        <input id="driver-email" type="email" placeholder="correo@unal.edu.co" style="flex:1;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
+        <input id="driver-password" type="password" placeholder="contraseña" style="width:90px;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
+        <button onclick="connect('driver')">Conectar</button>
+        <button onclick="disconnect('driver')">Desconectar</button>
+        <button onclick="markRead('driver')">Marcar leído</button>
+      </div>
+    </div>
+
+    <!-- Panel Pasajero -->
+    <div class="chat-panel passenger-panel">
+      <div class="panel-header">
+        <div class="avatar">🧑</div>
+        <div class="info">
+          <h3>Pasajero</h3>
+          <span>user_passenger_001</span>
+        </div>
+        <div id="passenger-status" class="status-dot disconnected"></div>
+      </div>
+      <div id="passenger-messages" class="messages"></div>
+      <div class="input-area">
+        <input id="passenger-input" type="text" placeholder="Escribe un mensaje..." disabled />
+        <button id="passenger-send" disabled onclick="sendMessage('passenger')">➤</button>
+      </div>
+      <div class="controls">
+        <input id="passenger-email" type="email" placeholder="correo@unal.edu.co" style="flex:1;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
+        <input id="passenger-password" type="password" placeholder="contraseña" style="width:90px;background:#1e293b;border:1px solid #475569;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:0.7rem;" />
+        <button onclick="connect('passenger')">Conectar</button>
+        <button onclick="disconnect('passenger')">Desconectar</button>
+        <button onclick="markRead('passenger')">Marcar leído</button>
+      </div>
+    </div>
+
+    <!-- Log de eventos -->
+    <div class="log-panel">
+      <h3>📡 Eventos Socket.IO</h3>
+      <div id="event-log" class="log-content"></div>
+    </div>
+  </div>
+
+  <script>
+    // ══════════════════════════════════════════
+    //  CONFIG
+    // ══════════════════════════════════════════
+    // SERVER apunta al API Gateway — todo el tráfico pasa por él
+    const SERVER = 'http://localhost:8080';
+    // Login directo al loggueo_service para obtener el token raw (Bearer)
+    // El gateway convierte el login en cookie HttpOnly, inaccesible desde JS
+    const LOGIN_URL = 'http://localhost:8000/api/v1/auth/login';
+
+    // Ruta fija para que ambos usuarios SIEMPRE compartan la misma conversación
+    const FIXED_ROUTE_ID = 'route_html_test_fixed';
+
+    let TOKENS = {};
+    let sockets = { driver: null, passenger: null };
+    let conversationId = null;
+
+    // Extrae el identificador de usuario (user_id o sub) de un JWT sin verificarlo
+    function parseUserId(tok) {
+      try {
+        const payload = JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return payload.user_id || payload.sub || 'unknown';
+      } catch { return 'unknown'; }
+    }
+
+    // ══════════════════════════════════════════
+    //  LOGIN REAL (loggueo_service)
+    // ══════════════════════════════════════════
+    async function loginUser(panel) {
+      const email = document.getElementById(panel + '-email').value.trim();
+      const password = document.getElementById(panel + '-password').value;
+
+      if (!email || !password) {
+        addSystemMsg(panel, '⚠ Ingresa email y contraseña');
+        return false;
+      }
+
+      logEvent('out', panel + ': login → ' + email);
+
+      try {
+        const res = await fetch(LOGIN_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: email, password }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          const msg = err.detail || 'Credenciales incorrectas';
+          logEvent('err', panel + ': login falló → ' + msg);
+          addSystemMsg(panel, '✗ ' + msg);
+          return false;
+        }
+
+        const data = await res.json();
+        TOKENS[panel] = data.access_token;
+        logEvent('in', panel + ': ✓ token obtenido');
+        addSystemMsg(panel, '✓ Login exitoso (' + email + ')');
+        return true;
+      } catch (e) {
+        logEvent('err', panel + ': error de red → ' + e.message);
+        addSystemMsg(panel, '✗ Error de red: ' + e.message);
+        return false;
+      }
+    }
+
+    // ══════════════════════════════════════════
+    //  UI HELPERS
+    // ══════════════════════════════════════════
+    function addMessage(panel, text, type, meta) {
+      const container = document.getElementById(panel + '-messages');
+      const div = document.createElement('div');
+      div.className = 'msg ' + type;
+      div.innerHTML = text + (meta ? '<div class="meta">' + meta + '</div>' : '');
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function addSystemMsg(panel, text) {
+      const container = document.getElementById(panel + '-messages');
+      const div = document.createElement('div');
+      div.className = 'msg-system';
+      div.textContent = text;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function logEvent(type, msg) {
+      const log = document.getElementById('event-log');
+      const time = new Date().toLocaleTimeString('es-CO');
+      const div = document.createElement('div');
+      div.className = 'log-entry event-' + type;
+      div.innerHTML = '<span class="time">[' + time + ']</span> ' + msg;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setStatus(panel, connected) {
+      document.getElementById(panel + '-status').className =
+        'status-dot ' + (connected ? 'connected' : 'disconnected');
+      document.getElementById(panel + '-input').disabled = !connected;
+      document.getElementById(panel + '-send').disabled = !connected;
+    }
+
+    function formatTime(iso) {
+      return new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    // ══════════════════════════════════════════
+    //  CREAR / OBTENER CONVERSACIÓN (una sola vez)
+    //  Llama a /api/chat/conversations a través del gateway.
+    //  El gateway valida el Bearer, inyecta X-User-Id y lo reescribe a /conversations.
+    // ══════════════════════════════════════════
+    async function ensureConversation(token) {
+      if (conversationId) return conversationId;
+
+      const driverToken = TOKENS['driver'];
+      const passengerToken = TOKENS['passenger'];
+
+      const driverId    = driverToken    ? parseUserId(driverToken)    : 'user_driver_001';
+      const passengerId = passengerToken ? parseUserId(passengerToken) : 'user_passenger_001';
+
+      const res = await fetch(SERVER + '/api/chat/conversations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token,
+        },
+        body: JSON.stringify({
+          routeId: FIXED_ROUTE_ID,
+          driverId,
+          passengerId,
+        }),
+      });
+      const data = await res.json();
+      conversationId = data.conversation._id || data.conversation.id;
+      logEvent('in', 'Conversación: ' + conversationId);
+      addSystemMsg('driver', 'Conversación: ' + conversationId.slice(-8));
+      addSystemMsg('passenger', 'Conversación: ' + conversationId.slice(-8));
+      return conversationId;
+    }
+
+    // ══════════════════════════════════════════
+    //  SOCKET CONNECTION
+    // ══════════════════════════════════════════
+    async function connect(panel) {
+      if (sockets[panel] && sockets[panel].connected) {
+        addSystemMsg(panel, 'Ya estás conectado');
+        return;
+      }
+
+      // Si no hay token, intentar login primero
+      if (!TOKENS[panel]) {
+        const ok = await loginUser(panel);
+        if (!ok) return;
+      }
+
+      var token = TOKENS[panel];
+      var userIdLocal = parseUserId(token);
+
+      logEvent('out', panel + ': Conectando al gateway...');
+
+      // path: '/api/chat/socket.io' — necesario para que el WS proxy del gateway
+      // intercepte la conexión (pathRewrite: '^/api/chat' → '') y la reenvíe al chat-service
+      var socket = io(SERVER, {
+        auth: { token: token },
+        path: '/api/chat/socket.io',
+        transports: ['websocket'],
+        forceNew: true,
+      });
+
+      socket.on('connect', async function () {
+        setStatus(panel, true);
+        addSystemMsg(panel, 'Conectado (socket: ' + socket.id + ')');
+        logEvent('in', panel + ': ✓ Conectado (' + socket.id + ')');
+
+        // Crear conversación solo una vez
+        try {
+          var convId = await ensureConversation(TOKENS[panel]);
+          socket.emit('conversation:join', { conversationId: convId });
+          logEvent('out', panel + ': conversation:join → ' + convId.slice(-8));
+          addSystemMsg(panel, 'Unido a la conversación');
+        } catch (e) {
+          logEvent('err', 'Error conversación: ' + e.message);
+          addSystemMsg(panel, 'Error: ' + e.message);
+        }
+      });
+
+      socket.on('disconnect', function (reason) {
+        setStatus(panel, false);
+        addSystemMsg(panel, 'Desconectado: ' + reason);
+        logEvent('err', panel + ': Desconectado (' + reason + ')');
+      });
+
+      socket.on('connect_error', function (err) {
+        setStatus(panel, false);
+        logEvent('err', panel + ': Error → ' + err.message);
+        addSystemMsg(panel, 'Error: ' + err.message);
+      });
+
+      // ── Mensaje nuevo ──
+      socket.on('message:new', function (data) {
+        logEvent('in', panel + ': message:new de ' + data.senderId);
+        // Mostrar solo si NO es propio (los propios ya se muestran al enviar)
+        if (data.senderId !== userIdLocal) {
+          addMessage(panel, data.content, 'received', formatTime(data.createdAt));
+        }
+      });
+
+      // ── Notificación ──
+      socket.on('notification:new', function (data) {
+        logEvent('in', panel + ': 🔔 notification → "' + (data.preview || '').slice(0, 40) + '"');
+      });
+
+      // ── Estado de mensaje ──
+      socket.on('message:status', function (data) {
+        var info = data.bulkStatus
+          ? data.bulkStatus + ' (' + data.count + ' msgs)'
+          : data.status + ' (msg: ' + (data.messageId || '').slice(-6) + ')';
+        logEvent('in', panel + ': message:status → ' + info);
+        addSystemMsg(panel, 'Estado: ' + info);
+      });
+
+      // ── Error del server ──
+      socket.on('error', function (data) {
+        logEvent('err', panel + ': error → ' + data.message);
+        addSystemMsg(panel, '⚠ ' + data.message);
+      });
+
+      sockets[panel] = socket;
+    }
+
+    // ══════════════════════════════════════════
+    //  SEND MESSAGE
+    // ══════════════════════════════════════════
+    function sendMessage(panel) {
+      var input = document.getElementById(panel + '-input');
+      var content = input.value.trim();
+      if (!content || !sockets[panel] || !sockets[panel].connected || !conversationId) return;
+
+      logEvent('out', panel + ': message:send → "' + content.slice(0, 40) + '"');
+
+      sockets[panel].emit('message:send', { conversationId: conversationId, content: content }, function (ack) {
+        if (ack && ack.success) {
+          addMessage(panel, content, 'sent', formatTime(ack.message.createdAt));
+          logEvent('in', panel + ': ACK ✓ (' + ack.message.messageId.slice(-6) + ')');
+        } else {
+          addSystemMsg(panel, 'Error: ' + (ack ? ack.error : 'Sin respuesta'));
+          logEvent('err', panel + ': ACK ✗ → ' + (ack ? ack.error : 'timeout'));
+        }
+      });
+
+      input.value = '';
+      input.focus();
+    }
+
+    // ══════════════════════════════════════════
+    //  MARK READ
+    // ══════════════════════════════════════════
+    function markRead(panel) {
+      if (!sockets[panel] || !sockets[panel].connected || !conversationId) return;
+      sockets[panel].emit('message:read', { conversationId: conversationId });
+      logEvent('out', panel + ': message:read');
+      addSystemMsg(panel, 'Marcando como leído...');
+    }
+
+    // ══════════════════════════════════════════
+    //  DISCONNECT
+    // ══════════════════════════════════════════
+    function disconnect(panel) {
+      if (sockets[panel]) {
+        sockets[panel].disconnect();
+        sockets[panel] = null;
+      }
+    }
+
+    // ══════════════════════════════════════════
+    //  ENTER KEY
+    // ══════════════════════════════════════════
+    document.getElementById('driver-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendMessage('driver');
+    });
+    document.getElementById('passenger-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendMessage('passenger');
+    });
+
+    // Sin auto-connect — el usuario hace login manualmente con credenciales reales
+  </script>
+</body>
+</html>
