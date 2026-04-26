@@ -23,6 +23,9 @@ import { AuthModule } from '../auth/auth.module';
 // Route Validation
 import { RouteValidationModule } from '../route-validation/route-validation.module';
 
+// RabbitMQ
+import { RabbitMQService } from '../config/rabbitmq';
+
 @Module({
   imports: [
     ConfigModule,
@@ -34,7 +37,6 @@ import { RouteValidationModule } from '../route-validation/route-validation.modu
     ]),
   ],
   providers: [
-    // Repositories (inyectados via tokens abstractos)
     {
       provide: CONVERSATION_REPOSITORY,
       useClass: ConversationRepository,
@@ -43,9 +45,9 @@ import { RouteValidationModule } from '../route-validation/route-validation.modu
       provide: MESSAGE_REPOSITORY,
       useClass: MessageRepository,
     },
-    // Service & Gateway
     ChatService,
     ChatGateway,
+    RabbitMQService,
   ],
   controllers: [ChatController],
   exports: [ChatService],

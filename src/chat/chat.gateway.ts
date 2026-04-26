@@ -14,6 +14,7 @@ import * as jwt from 'jsonwebtoken';
 import { ChatService } from './chat.service';
 import { JwtPayload } from '../auth/interfaces';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
+import { RabbitMQService } from '../config/rabbitmq';
 
 interface SocketUser {
   userId: string;
@@ -53,6 +54,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly chatService: ChatService,
     private readonly configService: ConfigService,
+    private readonly rabbitMQ: RabbitMQService,
   ) {}
 
   // ──────────────────────────────────────────────
@@ -239,7 +241,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const room = `conversation:${payload.conversationId}`;
       this.server.to(room).emit('message:new', messageData);
 
-      // Notificación al destinatario
+      // Notificación Socket.IO directa al destinatario (chat service)
       const recipientRoom = `user:${result.recipientUserId}`;
       this.server.to(recipientRoom).emit('notification:new', {
         type: 'chat_message',
@@ -249,6 +251,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         preview:
           payload.content.length > 120
             ? `${payload.content.slice(0, 117)}...`
+            : payload.content,
+        createdAt: result.message.createdAt,
+      });
+
+      // Publicar evento asíncrono a RabbitMQ → notifications-service persiste y reenvía
+      this.rabbitMQ.publish('chat.message', {
+        messageId:     result.message._id.toString(),
+        conversationId: result.conversationId,
+        senderId:      userId,
+        recipientId:   result.recipientUserId,
+        senderName:    userId,
+        preview:
+          payload.content.length > 100
+            ? `${payload.content.slice(0, 97)}...`
             : payload.content,
         createdAt: result.message.createdAt,
       });
