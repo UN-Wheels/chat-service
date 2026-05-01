@@ -43,6 +43,10 @@ interface SocketUser {
     credentials: true,
   },
   namespace: '/',
+  // pingInterval/pingTimeout mantienen el WS vivo a traves del bridge Docker
+  // y el proxy del API gateway (timeout: 0) que de otro modo lo cerrarian.
+  pingInterval: 25000,
+  pingTimeout: 20000,
 })
 @UseFilters(new WsExceptionFilter())
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
