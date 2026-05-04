@@ -16,6 +16,7 @@ import { MessageRepository } from './repositories/message.repository';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
+import { RabbitMQService } from '../config/rabbitmq';
 
 // Auth
 import { AuthModule } from '../auth/auth.module';

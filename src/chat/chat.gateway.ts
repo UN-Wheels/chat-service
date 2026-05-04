@@ -239,20 +239,40 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const room = `conversation:${payload.conversationId}`;
       this.server.to(room).emit('message:new', messageData);
 
+<<<<<<< Updated upstream
       // Notificación al destinatario
+=======
+      // Notificación al destinatario local
+>>>>>>> Stashed changes
       const recipientRoom = `user:${result.recipientUserId}`;
+      const previewText =
+        payload.content.length > 120
+          ? `${payload.content.slice(0, 117)}...`
+          : payload.content;
+
       this.server.to(recipientRoom).emit('notification:new', {
         type: 'chat_message',
         conversationId: result.conversationId,
         messageId: result.message._id.toString(),
         senderId: userId,
-        preview:
-          payload.content.length > 120
-            ? `${payload.content.slice(0, 117)}...`
-            : payload.content,
+        preview: previewText,
         createdAt: result.message.createdAt,
       });
 
+<<<<<<< Updated upstream
+=======
+      // Notificación global via RabbitMQ (para notifications-service)
+      this.rabbitMQ.publish('chat.message', {
+        messageId: result.message._id.toString(),
+        conversationId: result.conversationId,
+        senderId: userId,
+        recipientId: result.recipientUserId,
+        senderName: userId, // En este MVP el userId suele ser el email
+        preview: previewText,
+        createdAt: result.message.createdAt.toISOString ? result.message.createdAt.toISOString() : new Date().toISOString(),
+      }).catch(() => {});
+
+>>>>>>> Stashed changes
       // Retornar ACK con el mensaje creado
       return { success: true, message: messageData };
     } catch (error) {
