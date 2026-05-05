@@ -14,6 +14,7 @@ import * as jwt from 'jsonwebtoken';
 import { ChatService } from './chat.service';
 import { JwtPayload } from '../auth/interfaces';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
+import { RabbitMQService } from '../config/rabbitmq';
 
 interface SocketUser {
   userId: string;
@@ -53,6 +54,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly chatService: ChatService,
     private readonly configService: ConfigService,
+    private readonly rabbitMQ: RabbitMQService,
   ) {}
 
   // ──────────────────────────────────────────────
@@ -239,11 +241,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const room = `conversation:${payload.conversationId}`;
       this.server.to(room).emit('message:new', messageData);
 
-<<<<<<< Updated upstream
-      // Notificación al destinatario
-=======
-      // Notificación al destinatario local
->>>>>>> Stashed changes
+      // Notificación al destinatario (socket)
       const recipientRoom = `user:${result.recipientUserId}`;
       const previewText =
         payload.content.length > 120
@@ -259,20 +257,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         createdAt: result.message.createdAt,
       });
 
-<<<<<<< Updated upstream
-=======
       // Notificación global via RabbitMQ (para notifications-service)
-      this.rabbitMQ.publish('chat.message', {
-        messageId: result.message._id.toString(),
-        conversationId: result.conversationId,
-        senderId: userId,
-        recipientId: result.recipientUserId,
-        senderName: userId, // En este MVP el userId suele ser el email
-        preview: previewText,
-        createdAt: result.message.createdAt.toISOString ? result.message.createdAt.toISOString() : new Date().toISOString(),
-      }).catch(() => {});
-
->>>>>>> Stashed changes
+      this.rabbitMQ
+        .publish('chat.message', {
+          messageId: result.message._id.toString(),
+          conversationId: result.conversationId,
+          senderId: userId,
+          recipientId: result.recipientUserId,
+          senderName: userId, // En este MVP el userId suele ser el email
+          preview: previewText,
+          createdAt:
+            typeof (result.message.createdAt as any)?.toISOString === 'function'
+              ? (result.message.createdAt as any).toISOString()
+              : new Date(result.message.createdAt as any).toISOString(),
+        })
+        .catch(() => {});
       // Retornar ACK con el mensaje creado
       return { success: true, message: messageData };
     } catch (error) {

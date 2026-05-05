@@ -46,6 +46,7 @@ import { RouteValidationModule } from '../route-validation/route-validation.modu
     },
     // Service & Gateway
     ChatService,
+    RabbitMQService,
     ChatGateway,
   ],
   controllers: [ChatController],
