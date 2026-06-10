@@ -23,6 +23,9 @@ import { AuthModule } from '../auth/auth.module';
 // Route Validation
 import { RouteValidationModule } from '../route-validation/route-validation.module';
 
+// Events
+import { RabbitMQPublisherService } from '../events/rabbitmq-publisher.service';
+
 @Module({
   imports: [
     ConfigModule,
@@ -46,6 +49,7 @@ import { RouteValidationModule } from '../route-validation/route-validation.modu
     // Service & Gateway
     ChatService,
     ChatGateway,
+    RabbitMQPublisherService,
   ],
   controllers: [ChatController],
   exports: [ChatService],

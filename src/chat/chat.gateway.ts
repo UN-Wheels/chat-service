@@ -12,6 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { ChatService } from './chat.service';
+import { RabbitMQPublisherService } from '../events/rabbitmq-publisher.service';
 import { JwtPayload } from '../auth/interfaces';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
 
@@ -53,6 +54,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly chatService: ChatService,
     private readonly configService: ConfigService,
+    private readonly rabbitPublisher: RabbitMQPublisherService,
   ) {}
 
   // ──────────────────────────────────────────────
@@ -241,16 +243,29 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Notificación al destinatario
       const recipientRoom = `user:${result.recipientUserId}`;
+      const preview =
+        payload.content.length > 120
+          ? `${payload.content.slice(0, 117)}...`
+          : payload.content;
+
       this.server.to(recipientRoom).emit('notification:new', {
         type: 'chat_message',
         conversationId: result.conversationId,
         messageId: result.message._id.toString(),
         senderId: userId,
-        preview:
-          payload.content.length > 120
-            ? `${payload.content.slice(0, 117)}...`
-            : payload.content,
+        preview,
         createdAt: result.message.createdAt,
+      });
+
+      // Notificación global vía RabbitMQ → notifications-service (toasts fuera de /chat)
+      void this.rabbitPublisher.publish('chat.message', {
+        messageId: result.message._id.toString(),
+        conversationId: result.conversationId,
+        senderId: userId,
+        recipientId: result.recipientUserId,
+        senderName: userId,
+        preview,
+        createdAt: result.message.createdAt.toISOString(),
       });
 
       // Retornar ACK con el mensaje creado
